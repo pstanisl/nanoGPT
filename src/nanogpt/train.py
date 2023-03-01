@@ -4,11 +4,13 @@ from pathlib import Path
 
 import hydra
 import torch
+import torch.backends.cuda
+import torch.backends.cudnn
 from hydra.core.config_store import ConfigStore
 
-from nanogpt.config import GPTConfig, ModelConfig
-from nanogpt.model import GPT
-from nanogpt.utils import estimate_loss, get_batch, get_context, get_device
+from nanogpt.config import GPTConfig
+from nanogpt.model import GPT, get_checkpoint, get_model
+from nanogpt.utils import estimate_loss, get_batch, get_context, get_device, load_data
 
 cs = ConfigStore.instance()
 cs.store(name="gpt_config", node=GPTConfig)
@@ -18,54 +20,6 @@ logger = logging.getLogger(__name__)
 
 def get_lr(it: int) -> float:
     return 3e-4
-
-
-def load_data(path: Path, encoding: str = "utf-8") -> str:
-    with open(path, "r", encoding=encoding) as fr:
-        return fr.read()
-
-
-def get_checkpoint(config: GPTConfig, device: str = "cpu"):
-    ckpt_path = Path(config.run.output_dir) / "ckpt.pt"
-    return torch.load(ckpt_path, map_location=device)
-
-
-def get_model_from_checkpoint(
-    config: GPTConfig, device: str = "cpu"
-) -> tuple[GPT, int, float]:
-    logger.info(f"resuming training from {config.run.output_dir}")
-    checkpoint = get_checkpoint(config, device=device)
-
-    model_args = {}
-
-    for k in ModelConfig.get_keys():
-        model_args[k] = checkpoint["model_args"][k]
-    print(model_args)
-    model_config = ModelConfig(**model_args)
-    model = GPT(model_config)
-
-    state_dict = checkpoint["model"]
-    # Fix the keys of the state dictionary.
-    # NOTE: honestly no idea how checkpoints sometimes get this prefix, have to debug more
-    unwanted_prefix = "_orig_mod."
-    for k, v in state_dict.items():
-        if k.startswith(unwanted_prefix):
-            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
-    model.load_state_dict(state_dict)
-
-    return model, checkpoint["iter_num"], checkpoint["best_val_loss"]
-
-
-def get_model(config: GPTConfig, device: str = "cpu") -> tuple[GPT, int, float]:
-    init_from = config.run.init_from
-
-    if init_from == "scratch":
-        logger.info("initializing a new model from scratch")
-        return GPT(config=config.model), 0, 1e9
-    elif init_from == "resume":
-        return get_model_from_checkpoint(config=config, device=device)
-
-    raise ValueError(f"Uknown `init_from` value ({init_from=}).")
 
 
 def save_checkpoint(
