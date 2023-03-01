@@ -1,0 +1,27 @@
+defaults:
+  - gpt_config
+  - model: shakespeare_chars
+
+# model:
+#   bias: False
+#   block_size: 64
+#   dropout: 0.0
+#   n_embd: 384
+#   n_head: 6
+#   n_layer: 6
+
+run:
+  # always_save_checkpoint: False
+  # compile: False
+  # d_type: bfloat16  # 'float32', 'bfloat16', or 'float16'
+  output_dir: "./output.ignore"
+  # seed: 1337
+
+training:
+  batch_size: 64
+  # decau_lr: False
+  # eval_interval: 500
+  # eval_iters: 200
+  # grad_clip: 1.0
+  learning_rate: 3e-4
+  max_iters: 5000

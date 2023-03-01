@@ -1,12 +1,12 @@
 import logging
 import math
-from typing import Optional
+from pathlib import Path
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from nanogpt.config import ModelConfig
+from nanogpt.config import GPTConfig, ModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,14 @@ def new_gelu(x):
 
     Reference: Gaussian Error Linear Units (GELU) paper: https://arxiv.org/abs/1606.08415
     """
-    return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
+    return (
+        0.5
+        * x
+        * (
+            1.0
+            + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0)))
+        )
+    )
 
 
 class LayerNorm(nn.Module):
@@ -35,7 +42,6 @@ class LayerNorm(nn.Module):
 
 
 class CausalSelfAttention(nn.Module):
-
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         assert config.n_embd % config.n_head == 0
@@ -51,8 +57,12 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.dropout = config.dropout
 
-        # NOTE: flash attention make GPU go brrrrr but support is only in PyTorch nightly and still a bit scary
-        self.flash = hasattr(torch.nn.functional, "scaled_dot_product_attention") and self.dropout == 0.0
+        # NOTE: flash attention make GPU go brrrrr but support is only in PyTorch
+        #   nightly and still a bit scary
+        self.flash = (
+            hasattr(torch.nn.functional, "scaled_dot_product_attention")
+            and self.dropout == 0.0
+        )
         if not self.flash:
             logger.warn(
                 "using slow attention. Flash Attention atm needs PyTorch nightly and "
@@ -62,20 +72,26 @@ class CausalSelfAttention(nn.Module):
             # the input sequece
             self.register_buffer(
                 "bias",
-                torch.tril(
-                    torch.ones(config.block_size, config.block_size)
-                ).view(1, 1, config.block_size, config.block_size),
+                torch.tril(torch.ones(config.block_size, config.block_size)).view(
+                    1, 1, config.block_size, config.block_size
+                ),
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
-
+        # B - batch size, T - sequence length, C - embedding dimensionality (n_embd)
+        B, T, C = x.size()
         # Calculate query, key and value for all heads in batch and move head forward
         # to be in batch dimension
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(
+            1, 2
+        )  # (B, nh, T, hs)
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(
+            1, 2
+        )  # (B, nh, T, hs)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(
+            1, 2
+        )  # (B, nh, T, hs)
 
         # Casual self-attention; Self-attend: (B, nh, T, hs) x (B, nh, T, hs) -> (B, nh, T, hs)
         if self.flash:
@@ -90,8 +106,8 @@ class CausalSelfAttention(nn.Module):
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
             y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-
-        y = y.transpose(1, 2).contiguous().view(B, T, C)  # re-assemble all head outputs side by side
+        # Re-assemble all head outputs side by side
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
         # Output projection
         y = self.resid_dropout(self.c_proj(y))
         return y
@@ -119,11 +135,7 @@ class Block(nn.Module):
     """Transformer block: communication followed by computation"""
 
     def __init__(self, config: ModelConfig) -> None:
-        # n_head: embedding dimmension, n_head: the number of heads we'd like
         super().__init__()
-        # head_size = n_embd // n_head
-        # self.sa = MultiHeadAttention(n_head, head_size, n_embd, block_size, dropout)
-        # self.ffwd = FeedFoward(n_embd, dropout)
         self.ln1 = LayerNorm(config.n_embd, bias=config.bias)
         self.attn = CausalSelfAttention(config)
         self.ln2 = LayerNorm(config.n_embd, bias=config.bias)
@@ -137,7 +149,6 @@ class Block(nn.Module):
 
 
 class GPT(nn.Module):
-
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         assert config.vocab_size is not None
@@ -145,20 +156,23 @@ class GPT(nn.Module):
 
         self.config = config
 
-        self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
-            drop = nn.Dropout(config.dropout),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = LayerNorm(config.n_embd, bias=config.bias)
-        ))
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wpe=nn.Embedding(config.block_size, config.n_embd),
+                drop=nn.Dropout(config.dropout),
+                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                ln_f=LayerNorm(config.n_embd, bias=config.bias),
+            )
+        )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # With weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future version"
         # not 100% sure what this is, so far seems to be harmless.
         # TODO: investigate
-        self.transformer.wte.weight = self.lm_head.weight  # https://paperswithcode.com/method/weight-tying
+        # https://paperswithcode.com/method/weight-tying
+        self.transformer.wte.weight = self.lm_head.weight
 
         # Init all weights
         self.apply(self._init_weights)
@@ -194,12 +208,16 @@ class GPT(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         device = idx.device
         b, t = idx.size()
-        assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device).unsqueeze(0)  # shape (1, t)
+        assert (
+            t <= self.config.block_size
+        ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        pos = torch.arange(0, t, dtype=torch.long, device=device).unsqueeze(
+            0
+        )  # shape (1, t)
 
-        # Forward the GPT model itself
-        tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (1, t, n_embd)
+        # Forward the GPT model itself
+        tok_emb = self.transformer.wte(idx)  # token embed. of shape (b, t, n_embd)
+        pos_emb = self.transformer.wpe(pos)  # position embed. of shape (1, t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
 
         for block in self.transformer.h:
@@ -207,7 +225,7 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x)
 
         if targets is not None:
-            # If we are given some desired targets also calculate loss
+            # If we are given some desired targets also calculate loss
             logits = self.lm_head(x)
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
@@ -215,7 +233,8 @@ class GPT(nn.Module):
         else:
             # Inference-time mini-optimization: only forward the lm_head on the very
             # last position
-            logits = self.lm_head(x[:, -1, :])  # NOTE: using list [-1] to preserve the time dim
+            # NOTE: using list [-1] to preserve the time dim
+            logits = self.lm_head(x[:, [-1], :])
             loss = None
 
         return logits, loss
@@ -225,8 +244,7 @@ class GPT(nn.Module):
         return optimizer
 
     def estimate_mfu(self, fwdbwd_per_iter: int, dt: float) -> float:
-        """Estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS.
-        """
+        """Estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS."""
         # First estimate the number of flops we do per iteration.
         # See PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
         N = self.get_num_params()
@@ -243,8 +261,12 @@ class GPT(nn.Module):
 
     @torch.no_grad()
     def generate(
-        self, idx, max_new_tokens: int, temperature: float = 1.0, top_k = None
-    ):
+        self,
+        idx: torch.Tensor,
+        max_new_tokens: int,
+        temperature: float = 1.0,
+        top_k=None,
+    ) -> torch.Tensor:
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and
         complete the sequence max_new_tokens times, feeding the predictions back into
@@ -253,14 +275,20 @@ class GPT(nn.Module):
         """
         for _ in range(max_new_tokens):
             # If the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
-            # Forward the model to get the logits for the index in the sequence
+            idx_cond = (
+                idx
+                if idx.size(1) <= self.config.block_size
+                else idx[:, -self.config.block_size :]
+            )
+            # Forward the model to get the logits for the index in the sequence
             logits, _ = self(idx_cond)
-            # Pluck the logits at the final step and scale by desired temperature
+            # Pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
             # Optionally crop the logits to only the top `k` options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                # NOTE: The operator 'aten::nonzero' is not currently supported on
+                #   the MPS backend and will fall back to run on the CPU.
                 logits[logits < v[:, [-1]]] = -float("Inf")
             # Apply softmax to convert logits to (normalized) probabilities
             probs = F.softmax(logits, dim=-1)
@@ -270,3 +298,47 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+
+
+def get_checkpoint(config: GPTConfig, device: str = "cpu"):
+    ckpt_path = Path(config.run.output_dir) / "ckpt.pt"
+    return torch.load(ckpt_path, map_location=device)
+
+
+def get_model_from_checkpoint(
+    config: GPTConfig, device: str = "cpu"
+) -> tuple[GPT, int, float]:
+    logger.info(f"resuming training from `{config.run.output_dir}`")
+    checkpoint = get_checkpoint(config, device=device)
+
+    model_args = {}
+
+    for k in ModelConfig.get_keys():
+        model_args[k] = checkpoint["model_args"][k]
+    # print(model_args)
+    model_config = ModelConfig(**model_args)
+    model = GPT(model_config)
+
+    state_dict = checkpoint["model"]
+    # Fix the keys of the state dictionary.
+    # NOTE: honestly no idea how checkpoints sometimes get this prefix,
+    #   have to debug more
+    unwanted_prefix = "_orig_mod."
+    for k, v in state_dict.items():
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+    model.load_state_dict(state_dict)
+
+    return model, checkpoint["iter_num"], checkpoint["best_val_loss"]
+
+
+def get_model(config: GPTConfig, device: str = "cpu") -> tuple[GPT, int, float]:
+    init_from = config.run.init_from
+
+    if init_from == "scratch":
+        logger.info("initializing a new model from scratch")
+        return GPT(config=config.model), 0, 1e9
+    elif init_from == "resume":
+        return get_model_from_checkpoint(config=config, device=device)
+
+    raise ValueError(f"Uknown `init_from` value ({init_from=}).")

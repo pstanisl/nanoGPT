@@ -149,12 +149,12 @@ def train(
             break
 
 
-@hydra.main(version_base=None, config_path="../../conf", config_name="gpt")
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
 def main(config: GPTConfig) -> None:
     # master_process = True
     seed_offset = 0
 
-    torch.manual_seed(1337 + seed_offset)
+    torch.manual_seed(config.run.seed + seed_offset)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 
@@ -167,13 +167,10 @@ def main(config: GPTConfig) -> None:
 
     stoi = {ch: i for i, ch in enumerate(chars)}
     itos = {i: ch for i, ch in enumerate(chars)}
-
-    encode = lambda s: [
-        stoi[c] for c in s
-    ]  # encoder: take a string, output a list of integers
-    decode = lambda l: "".join(
-        [itos[i] for i in l]
-    )  # decoder: take a list of integers, output a string
+    # encoder: take a string, output a list of integers
+    encode = lambda s: [stoi[c] for c in s]
+    # decoder: take a list of integers, output a string
+    decode = lambda l: "".join([itos[i] for i in l])
 
     data = torch.tensor(encode(text), dtype=torch.long)
     n = int(0.9 * len(data))

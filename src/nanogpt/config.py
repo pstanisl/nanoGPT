@@ -1,23 +1,5 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-
-
-@dataclass
-class ExampleConfig:
-    """Example of the config"""
-
-    folds: int = 10
-    test_size: float = 0.1
-    debug: bool = False
-
-
-@dataclass
-class OpenAIConfig:
-    """Example of the config"""
-
-    model_name: str = "text-davinci-003"
-    temperature: float = 0.7
-    debug: bool = False
 
 
 @dataclass
@@ -50,12 +32,14 @@ class TrainingConfig:
 
 @dataclass
 class RunConfig:
-    init_from: str
     output_dir: Path
 
     always_save_checkpoint: bool = False
     compile: bool = False
     d_type: str = "bfloat16"  # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    init_from: str = "scratch"
+
+    seed: int = 1337
 
 
 @dataclass

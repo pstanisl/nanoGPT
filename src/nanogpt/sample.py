@@ -15,7 +15,7 @@ cs = ConfigStore.instance()
 cs.store(name="gpt_config", node=GPTConfig)
 
 
-@hydra.main(version_base=None, config_path="../../conf", config_name="gpt")
+@hydra.main(version_base=None, config_path="../../conf", config_name="config")
 def main(config: GPTConfig) -> None:
     seed = 1337
     torch.manual_seed(config.run.seed)
