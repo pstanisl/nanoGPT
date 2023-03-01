@@ -1,7 +1,7 @@
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -71,3 +71,8 @@ def get_device() -> str:
         return "mps"
 
     return "cpu"
+
+
+def load_data(path: Path, encoding: str = "utf-8") -> str:
+    with open(path, "r", encoding=encoding) as fr:
+        return fr.read()
